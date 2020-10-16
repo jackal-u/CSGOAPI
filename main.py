@@ -3,26 +3,35 @@ import win32gui
 import win32process
 import pymem
 import ctypes
-import time
+import time,json
 
+"""
+用于测试的csgo账号（不要登录公网VAC服务器）:
+账号:mmye252570
+密码：ojpd6n9z
+
+"""
 
 class CSAPI:
 
     def __init__(self):
-        self.dwEntityList = 81064444
-        self.m_iHealth = 256
-        self.dwClientState_GetLocalPlayer = 384
+        with open("./csgo.json") as conf:
+            off_set_dict=json.load(conf)
+        self.dwEntityList = int(off_set_dict["signatures"]["dwEntityList"])
+        self.m_iHealth = int(off_set_dict["netvars"]["m_iHealth"])
+        self.dwClientState_GetLocalPlayer = int(off_set_dict["signatures"]["dwClientState_GetLocalPlayer"])
         self.client_dll = 0
         self.handle = 0
-        self.m_hMyWeapons = 11768
-        self.m_angEyeAnglesX = 45948
-        self.m_angEyeAnglesY = 45952
+        self.m_hMyWeapons = int(off_set_dict["netvars"]["m_hMyWeapons"])
+        self.m_angEyeAnglesX = int(off_set_dict["netvars"]["m_angEyeAnglesX"])
+        self.m_angEyeAnglesY = int(off_set_dict["netvars"]["m_angEyeAnglesY"])
         self.off_enginedll = 0
-        self.dwClientState = 5807572
-        self.dwClientState_ViewAngles = 19848
-        self.m_vecOrigin = 312
-        self.m_vecViewOffset = 264
-        self.dwLocalPlayer = 13872220
+        self.dwClientState = int(off_set_dict["signatures"]["dwClientState"])
+        self.dwClientState_ViewAngles = int(off_set_dict["signatures"]["dwClientState_ViewAngles"])
+        self.m_vecOrigin = int(off_set_dict["netvars"]["m_vecOrigin"])
+        self.m_vecViewOffset = int(off_set_dict["netvars"]["m_vecViewOffset"])
+        self.dwLocalPlayer = int(off_set_dict["signatures"]["dwLocalPlayer"])
+        self.m_iItemDefinitionIndex=int(off_set_dict["netvars"]["m_iItemDefinitionIndex"])
         # todo:自动导入csgo.json为本类属性
 
         # Counter-Strike: Global Offensive 窗口标题 获得窗口句柄
@@ -68,22 +77,56 @@ class CSAPI:
 
 
     def get_weapon(self):
-        # todo: 武器内容比较复杂，每个武器都是个单独的对象，每个人物都拥有一个武器列表
-            # 获取当前人物武器
-            player=0
-            # 如果p 为0 则为 当前 人的血量
-            # entity = self.handle.read_bytes(self.client_dll + self.dwEntityList + player * 0x10, 4)  # 10为每个实体的偏移
-            # entity = int.from_bytes(entity, byteorder='little')
+            # todo: 武器内容比较复杂，每个武器都是个单独的对象，每个人物都拥有一个武器64位的指针列表
+            """
+                The m_hMyWeapons array contains handles to all weapons equipped by the local player.
+                We can apply skin and model values to those weapons' entities independent to which weapon the local player is holding in hands.
+                self.client_dll+self.dwLocalPlayer 获得当前用户的引用LOCAL
+                LOCAL+m_hMyWeapons 获得当前用户的武器数组array。
+                for 遍历（10）当前用户武器数组，获得武器实体的引用V（每个元素添加偏移0x4）
+                V指针通过 dwEntityList + (currentWeapon - 1) * 0x10 获得当前武器的元信息；
+                currentWeapon + m_iItemDefinitionIndex获得当前武器的 具体型号。
+
+                C4:49
+                匪徒刀：59
+                CT刀：42
+                p2000:32
+                glock：4
+
+            """
+
             # if entity != 0:
-            # 获取local基地址
-            local_add = self.handle.read_bytes(self.client_dll + self.dwClientState_GetLocalPlayer, 4)
+            # 获取local基地址 self.client_dll + self.dwEntityList + 0*0x10
+            local_add = self.handle.read_bytes(self.client_dll+self.dwLocalPlayer, 4)
             local_add = int.from_bytes(local_add, byteorder='little')
-            weapon = self.handle.read_bytes(local_add + self.m_hMyWeapons, 4)
-            weapon = int.from_bytes(weapon, byteorder='little')
-            print("player P %d : %d", player, weapon)
+            # print(local_add)
+            weapon_list=[]
+            for i in range(8):
+                # 武器数组array遍历获得武器引用。
+                weapon_each = self.handle.read_bytes(local_add + self.m_hMyWeapons + i * 0x4, 4)
+                weapon_each = int.from_bytes(weapon_each, byteorder='little') & 0xfff               # 我也不知道为什么按位与 1111
+                # print("waepon_each:  " +  str(weapon_each))
+                # 武器引用获得武器元信息。
+                weapon_meta = self.handle.read_bytes(self.client_dll + self.dwEntityList + (weapon_each - 1) * 0x10, 4)
+                weapon_meta = int.from_bytes(weapon_meta, byteorder='little')
+                # print("weapon_meta:  " + str(weapon_meta))
+                if weapon_meta == 0:
+                    break
+                # # 武器元信息获得武器index。
+                weapon_index = self.handle.read_int(weapon_meta+self.m_iItemDefinitionIndex)
+                # print("weapon_index", weapon_index)
+                weapon_list.append(weapon_index)
+            return weapon_list
+
+
+
 
 
     def get_current_xy(self):
+        """
+        用于获得当前人物指针的指向，x轴(+180-180)，y轴(+-90)
+        :return:
+        """
         player = 0
         entity = self.handle.read_bytes(self.client_dll + self.dwEntityList + player * 0x10, 4)  # 10为每个实体的偏移
         entity = int.from_bytes(entity, byteorder='little')
@@ -101,6 +144,11 @@ class CSAPI:
         print("player {p}  : {x}  y: {y}".format(p=player, x=view_x, y=view_y))
     
     def get_current_position(self):
+        """
+        获得当前玩家的所在位置，两个维度
+        :return:
+        """
+
 
         aimlocalplayer = self.handle.read_int(self.client_dll+self.dwLocalPlayer)
         vecorigin = self.handle.read_int(( aimlocalplayer + self.m_vecOrigin))
@@ -119,11 +167,15 @@ class CSAPI:
         print("localtion: {x}     {y}    {z}".format(x=localpos1,y=localpos2,z=localpos3))
 
 
+
+
 if __name__ == '__main__':
     handle = CSAPI()
 
     for i in range(100000):
-        handle.get_current_position()
+        list=handle.get_weapon()
+        print(list)
         time.sleep(0.1)
+
 
 
