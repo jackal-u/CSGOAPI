@@ -5,6 +5,8 @@ import pymem
 import ctypes
 import time,json
 
+from message_queue import  *
+
 """
 用于测试的csgo账号（不要登录公网VAC服务器）:
 账号:mmye252570
@@ -315,8 +317,8 @@ class CSAPI:
     def set_walk(self,list):
         # wasd jump attack
         # 下蹲还没有做，正在探讨方法
-        if len(list)!=5:
-            print("WASD长度不为5")
+        if len(list)!=6:
+            print("WASD长度不为6")
         self.handle.write_int(self.client_dll + self.dwForceForward, list[0])
         self.handle.write_int(self.client_dll + self.dwForceBackward, list[1])
         self.handle.write_int(self.client_dll + self.dwForceLeft, list[2])
@@ -334,15 +336,22 @@ class CSAPI:
             total_blood += 100
         return total_blood-reward
 
+    def get_all_situation(self):
+        """
+        [hp, view_y(pitch),view_x(yaw),  pos1,pos2,pos3  ,  my_weapon x 8 ,  enemy_position X 15 , enemy_health x 5]
+
+        :return:
+        """
+        list = self.get_health() + self.get_current_xy() + self.get_current_position() + self.get_weapon() + self.get_enemy_position() + self.get_enemy_health()
+        return list
 
 
 if __name__ == '__main__':
     handle = CSAPI()
+    queue = Queue()
 
-    for i in range(100000):
-        action=[1,0,1,0,6]
-        list=handle.set_aim([float(-45),float(+0)])
-        print(list)
+    while True:
+        queue.push_g2m(handle.get_all_situation)
         time.sleep(1)
 
 
