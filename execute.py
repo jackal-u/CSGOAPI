@@ -38,11 +38,32 @@ def execute_action_list(a,b,c,str_li):
     for i in range(len(walk_list)):
         walk_list[i] = int(walk_list[i])
     aim_list = real_list[-2:]
-    print(walk_list,aim_list)
+    print(walk_list, aim_list)
     api.set_walk(walk_list)
     api.set_aim(aim_list)
 
 
+def execute_action_aim_list(a, b, c, str_li):
+    """
+     接受模型传来的数据然后执行杀人！
+        [1,     +-90 , +- 180     ,    is_reset  0/1]      3
+        规则：
+
+     1.转换类型
+     2.调用api 执行功能
+    :param str_li:
+    :return:
+    """
+    real_list = str_to_float_list(str(str_li))
+
+    is_fire = real_list[:1]
+    aim_list = real_list[-3:]
+    print(is_fire, aim_list)
+    api.set_attack(int(is_fire[0]))
+    api.set_aim(aim_list)
+
+
+
 if __name__ == '__main__':
     # 消费数组并执行数组中的操作
-    queue.consume_m2g(execute_action_list)
+    queue.consume_m2g(execute_action_aim_list)

@@ -3,9 +3,10 @@ import win32gui
 import win32process
 import pymem
 import ctypes
-import time,json
+import time,json,math
 
 from message_queue import  *
+from tutorial.autoaim import normalizeAngles, checkangles, calc_distance, nanchecker
 
 """
 用于测试的csgo账号（不要登录公网VAC服务器）:
@@ -43,6 +44,7 @@ class CSAPI:
         self.dwForceRight = int(off_set_dict["signatures"]["dwForceRight"])
         self.dwForceJump = int(off_set_dict["signatures"]["dwForceJump"])
         self.m_iItemDefinitionIndex=int(off_set_dict["netvars"]["m_iItemDefinitionIndex"])
+
         # todo:自动导入csgo.json为本类属性
 
         # Counter-Strike: Global Offensive 窗口标题 获得窗口句柄
@@ -69,7 +71,9 @@ class CSAPI:
             print("didn't get the window handle")
             exit()
         # todo:已经得到了基地址，加上任意偏移就可读写表地址的数值
-
+        list = self.get_current_xy()
+        self.aim_x = list[0]
+        self.aim_y = list[1]
 
     def get_health(self):
             # 获取当前人物血量
@@ -144,7 +148,11 @@ class CSAPI:
         #
         #     y = self.handle.read_int(entity + self.m_angEyeAnglesY)
         #     y&=0x8000
-        print("player {p}  : {x}  y: {y}".format(p=player, x=view_x, y=view_y))
+
+        view_x,view_y = normalizeAngles(view_x,view_y)
+
+
+
         list.append(view_x)
         list.append(view_y)
         return list
@@ -175,7 +183,7 @@ class CSAPI:
         """
         # list=[0 for i in range(15)]
         list = []
-
+        counter = 0
         aimlocalplayer = self.handle.read_int(self.client_dll+self.dwLocalPlayer)
         # 得到敌人的偏移
         my_team = self.handle.read_int(aimlocalplayer + self.m_iTeamNum)
@@ -201,16 +209,64 @@ class CSAPI:
                     # list.append(enemypos3)
                     # enemy_num += 3
                 else:
-
-                    # # 敌军
-                    aimplayerbones = self.handle.read_int(entity + self.m_dwBoneMatrix)
-                    enemypos1 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x0C)
-                    enemypos2 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x1C)
-                    enemypos3 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x2C)
-                    list.append(enemypos1)
-                    list.append(enemypos2)
-                    list.append(enemypos3)
+                    if counter < 5:
+                        # # 敌军
+                        aimplayerbones = self.handle.read_int(entity + self.m_dwBoneMatrix)
+                        enemypos1 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x0C)
+                        enemypos2 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x1C)
+                        enemypos3 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x2C)
+                        list.append(enemypos1)
+                        list.append(enemypos2)
+                        list.append(enemypos3)
+                        counter += 1
         return  list
+
+    def get_enemy_position_single(self):
+        """
+        输出 长度为15的数组，每三个代表一个敌人的位置，他们按照内存顺序排序
+
+        :return:
+        """
+        # list=[0 for i in range(15)]
+        list = []
+        counter = 0
+        aimlocalplayer = self.handle.read_int(self.client_dll+self.dwLocalPlayer)
+        # 得到敌人的偏移
+        my_team = self.handle.read_int(aimlocalplayer + self.m_iTeamNum)
+        enemy_num = 0
+        for i in range(64):
+
+            entity = self.handle.read_bytes(self.client_dll + self.dwEntityList + i * 0x10, 4)  # 10为每个实体的偏移
+            entity = int.from_bytes(entity, byteorder='little')
+            if (entity != 0):  # 实体非空，则进行处理
+                team = self.handle.read_int(entity + self.m_iTeamNum)
+                # 实体 + 队伍偏移 == local_player + 队伍偏移 来判断是否是友军
+                if (my_team == team):
+                    # 友军
+                    # 敌军
+                    pass
+                    # aimplayerbones = self.handle.read_int(entity + self.m_dwBoneMatrix)
+                    # enemypos1 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x0C)
+                    # enemypos2 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x1C)
+                    # enemypos3 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x2C)
+                    #
+                    # list.append(enemypos1)
+                    # list.append(enemypos2)
+                    # list.append(enemypos3)
+                    # enemy_num += 3
+                else:
+                    if counter < 1:
+                        # # 敌军
+                        aimplayerbones = self.handle.read_int(entity + self.m_dwBoneMatrix)
+                        enemypos1 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x0C)
+                        enemypos2 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x1C)
+                        enemypos3 = self.handle.read_float(aimplayerbones + 0x30 * 1 + 0x2C)
+                        list.append(enemypos1)
+                        list.append(enemypos2)
+                        list.append(enemypos3)
+                        counter += 1
+        return  list
+
 
     def get_friendly_position(self):
         """
@@ -251,7 +307,7 @@ class CSAPI:
                 """
         # list=[0 for i in range(15)]
         list = []
-
+        counter = 0
         aimlocalplayer = self.handle.read_int(self.client_dll + self.dwLocalPlayer)
         # 得到敌人的偏移
         my_team = self.handle.read_int(aimlocalplayer + self.m_iTeamNum)
@@ -266,12 +322,14 @@ class CSAPI:
                     pass
 
                 else:
-                    # todo: 敌人血量，开局应重置为100
-                    # # 敌军
-                    # 获取当前人物血量
-                    health = self.handle.read_bytes(entity + self.m_iHealth, 4)
-                    health = int.from_bytes(health, byteorder='little')
-                    list.append(health)
+                    if counter < 5:
+                        # todo: 敌人血量，开局应重置为100
+                        # # 敌军
+                        # 获取当前人物血量
+                        health = self.handle.read_bytes(entity + self.m_iHealth, 4)
+                        health = int.from_bytes(health, byteorder='little')
+                        list.append(health)
+                        counter+=1
         return list
 
     def get_friendly_health(self):
@@ -305,14 +363,38 @@ class CSAPI:
         # 测试中，无作用
         self.handle.write_int(self.client_dll + self.dwForceAttack2, -1)
 
-    def set_aim(self,list):
+    def set_attack(self,i):
+        # 测试中，无作用
+        self.handle.write_int(self.client_dll + self.dwForceAttack, i)
+
+    def set_aim(self, list):
         # [pitch, yaw]
         # +-90  +-180
-        pitch = list[0]
-        yaw = list[1]
+        pitch = self.aim_y + list[0]
+        yaw = self.aim_x + list[1]
+        print("pitch  yaw",pitch,yaw)
+        # self.aim_y = list[0]
+        # self.aim_x = list[1]
+        self.aim_y = pitch
+        self.aim_x = yaw
+        if pitch > +80.0 or pitch  < -80.0:
+            print("protected!")
+            self.aim_y = 0.0
+        # if yaw > 80  or yaw < -80:
+        #     print("protected!")
+        #     self.aim_x = 0.0
+
+
+        print('self.y self x :',self.aim_y,self.aim_x)
         enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
-        self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), pitch)
-        self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), yaw)
+        self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
+        self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
+
+    def set_reset_aim(self,is_reset):
+        if is_reset:
+            pass
+            # self.aim_y = 10.0
+            # self.aim_x = 10.0
 
     def set_walk(self,list):
         # wasd jump attack
@@ -327,14 +409,62 @@ class CSAPI:
         if list[5]:
             self.handle.write_int(self.client_dll + self.dwForceAttack, 6)
 
+
     def get_reward(self):
+
         reward = 0
         total_blood = 0
         list = self.get_enemy_health()
         for i in list:
             reward += i
             total_blood += 100
-        return total_blood-reward
+        reward = (total_blood-reward)*0.005
+
+        print('blood_reawrd: ',reward)
+
+        # todo:如果瞄准准星很靠近预期方向那就基于更多的reward，且reward最好取连续值
+        pos = self.get_current_position()
+        posx = pos[0]
+        posy = pos[1]
+        posz = pos[2]
+        e_pos = self.get_enemy_position()
+        e_posx = e_pos[0]
+        e_posy = e_pos[1]
+        e_posz = e_pos[2]
+        targetline1 = e_posx - posx
+        targetline2 = e_posy - posy
+        targetline3 = e_posz - posz
+
+        if targetline2 == 0 and targetline1 == 0:
+            yaw = 0
+            if targetline3 > 0:
+                pitch = 270
+            else:
+                pitch = 90
+        else:
+            yaw = (math.atan2(targetline2, targetline1) * 180 / math.pi)
+            if yaw < 0:
+                yaw += 360
+            hypotenuse = math.sqrt(
+                (targetline1 * targetline1) + (targetline2 * targetline2) + (targetline3 * targetline3))
+            pitch = (math.atan2(-targetline3, hypotenuse) * 180 / math.pi)
+            if pitch < 0:
+                pitch += 360
+
+        pitch, yaw = normalizeAngles(pitch, yaw)
+        cur = self.get_current_xy()
+        cur_shang_xia = cur[0]
+        cur_zuoyou = cur[1]
+        # print("x_grad",pitch,"y_grad",yaw)
+        print("当前俯仰角：",cur_shang_xia , "当前方位角",cur_zuoyou )
+        print("正确俯仰角",pitch , "正确方位角", yaw)
+        reward += 100/(abs(cur_zuoyou - yaw)  + abs(cur_shang_xia - pitch) )
+
+
+        # print('aim_reward: ',reward)
+
+        return reward
+
 
     def get_all_situation(self):
         """
@@ -345,14 +475,26 @@ class CSAPI:
         list = self.get_health() + self.get_current_xy() + self.get_current_position() + self.get_weapon() + self.get_enemy_position() + self.get_enemy_health()
         return list
 
+    def get_aim_situation(self):
+        """
+        由于目前我们技术比较菜，之前的那个all_situation明显过于复杂，我们现在假设一个简单的情景：
+        我们拿着AK，站立不动，操作维度仅仅为：是否开火，瞄准位置
+                [1,     +-90 , +- 180]      3
+                            反馈维度：瞄准位置，自己位置，单个敌人位置，敌人健康
+                [view_y(pitch),view_x(yaw),  pos1,pos2,pos3  , enemy_position X 3 , reward x 1。 ] 9 维度
+
+                :return:
+                """
+        list =  self.get_current_xy() + self.get_current_position() + self.get_enemy_position_single() + [self.get_reward()]
+        return list
 
 if __name__ == '__main__':
     handle = CSAPI()
-    queue = Queue()
+
 
     while True:
-        queue.push_g2m(handle.get_all_situation)
-        time.sleep(1)
+        print(handle.get_reward())
+        time.sleep(0.1)
 
 
 

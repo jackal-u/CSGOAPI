@@ -11,6 +11,7 @@ execute.py脚本应该第一个启动。
 """
 
 while True:
-    list = api.get_all_situation()
+    list = api.get_aim_situation()
     queue.push_g2m(list)
-    time.sleep(1/10)
+    # print(list)
+    time.sleep(1/64)
