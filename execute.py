@@ -1,6 +1,7 @@
 from api import *
 from message_queue import *
 
+
 api = CSAPI()
 queue = Queue()
 
@@ -61,7 +62,7 @@ def execute_action_aim_list(a, b, c, str_li):
     print(is_fire, aim_list)
     api.set_attack(int(is_fire[0]))
     api.set_aim(aim_list)
-
+    # api.set_reset_aim(real_list[-1])
 
 
 if __name__ == '__main__':

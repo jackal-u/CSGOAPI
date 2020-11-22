@@ -3,7 +3,7 @@ import win32gui
 import win32process
 import pymem
 import ctypes
-import time,json,math
+import time,json,math,random
 
 from message_queue import  *
 from tutorial.autoaim import normalizeAngles, checkangles, calc_distance, nanchecker
@@ -74,6 +74,7 @@ class CSAPI:
         list = self.get_current_xy()
         self.aim_x = list[0]
         self.aim_y = list[1]
+        self.steps = 0
 
     def get_health(self):
             # 获取当前人物血量
@@ -377,24 +378,75 @@ class CSAPI:
         # self.aim_x = list[1]
         self.aim_y = pitch
         self.aim_x = yaw
-        if pitch > +80.0 or pitch  < -80.0:
-            print("protected!")
-            self.aim_y = 0.0
-        # if yaw > 80  or yaw < -80:
-        #     print("protected!")
-        #     self.aim_x = 0.0
-
-
-        print('self.y self x :',self.aim_y,self.aim_x)
+        print("俯仰角   ",self.aim_y ,'方位角：  ' , self.aim_x)
         enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
         self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
         self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
 
-    def set_reset_aim(self,is_reset):
+        # 下面是重置代码，用于reset极端情况，避免不必要的训练
+        if pitch > +80.0 or pitch  < -80.0:
+            print("protected!")
+            self.aim_y = 0.0
+        pos = self.get_current_position()
+        posx = pos[0]
+        posy = pos[1]
+        posz = pos[2]
+        e_pos = self.get_enemy_position()
+        e_posx = e_pos[0]
+        e_posy = e_pos[1]
+        e_posz = e_pos[2]
+        targetline1 = e_posx - posx
+        targetline2 = e_posy - posy
+        targetline3 = e_posz - posz
+
+        if targetline2 == 0 and targetline1 == 0:
+            yaw = 0
+            if targetline3 > 0:
+                pitch = 270
+            else:
+                pitch = 90
+        else:
+            yaw = (math.atan2(targetline2, targetline1) * 180 / math.pi)
+            if yaw < 0:
+                yaw += 360
+            hypotenuse = math.sqrt(
+                (targetline1 * targetline1) + (targetline2 * targetline2) + (targetline3 * targetline3))
+            pitch = (math.atan2(-targetline3, hypotenuse) * 180 / math.pi)
+            if pitch < 0:
+                pitch += 360
+
+        pitch, yaw = normalizeAngles(pitch, yaw)
+        cur = self.get_current_xy()
+        cur_shang_xia = cur[0]
+        cur_zuoyou = cur[1]
+        # 如果训练经过200步，角度差距还大于10，则进行重置；重置到敌人脑袋附近
+        if self.steps%200==0 and ( abs(cur_zuoyou - yaw) > 10  or abs(cur_shang_xia - pitch) > 20):
+            print("RESET!!!!")
+            self.aim_x = yaw + random.random() * 5
+            self.aim_y = pitch + random.random() * 3
+            print("【重置！！】俯仰角   ", self.aim_y, '方位角：  ', self.aim_x)
+            self.steps += 1
+            return
+        if abs(cur_zuoyou - yaw) < 5 and abs(cur_shang_xia - pitch) < 10:
+            print("RESET!!!!")
+            self.aim_x = yaw + random.random() * 5
+            self.aim_y = pitch + random.random() * 3
+            self.steps += 1
+            return
+
+        self.steps+=1
+        print("steps: ",self.steps)
+
+
+
+
+    def set_reset_aim(self,is_reset,list):
         if is_reset:
-            pass
-            # self.aim_y = 10.0
-            # self.aim_x = 10.0
+            self.aim_x = list [0]
+            self.aim_y = list [1]
+            enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
+            self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
+            self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
 
     def set_walk(self,list):
         # wasd jump attack
@@ -418,7 +470,7 @@ class CSAPI:
         for i in list:
             reward += i
             total_blood += 100
-        reward = (total_blood-reward)*0.005
+        reward = (total_blood-reward)*0.05
 
         print('blood_reawrd: ',reward)
 
@@ -458,11 +510,22 @@ class CSAPI:
         # print("x_grad",pitch,"y_grad",yaw)
         print("当前俯仰角：",cur_shang_xia , "当前方位角",cur_zuoyou )
         print("正确俯仰角",pitch , "正确方位角", yaw)
+        # 如果 位置没有达到期望值 就基于惩罚
+        if abs(cur_zuoyou - yaw) > 30 :
+            reward -= (abs(cur_zuoyou - yaw)-30)*10
+        if abs(cur_shang_xia - pitch) > 15 :
+            reward -= (abs(cur_shang_xia - pitch)-15)*10
         reward += 100/(abs(cur_zuoyou - yaw)  + abs(cur_shang_xia - pitch) )
 
+        if abs(cur_shang_xia) > 45:
+            reward -= abs(cur_shang_xia)
+        if self.steps % 200 == 0 and (abs(cur_zuoyou - yaw) > 10 or abs(cur_shang_xia - pitch) > 20):
+            print("RESET 惩罚 !!!!")
+            reward -= (abs(cur_zuoyou - yaw)+ abs(cur_shang_xia - pitch) )
 
+        print("STEPS:",self.steps)
         # print('aim_reward: ',reward)
-
+        self.steps += 1
         return reward
 
 

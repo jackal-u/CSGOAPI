@@ -1,8 +1,7 @@
-from api import *
-from message_queue import *
+# from api import *
+# from message_queue import *
+from execute import *
 
-api = CSAPI()
-queue = Queue()
 """
 execute.py脚本应该第一个启动。
 队列为：RMQ  网址:http://47.94.143.151:15672 用户：guest 密码:8088178
@@ -14,4 +13,4 @@ while True:
     list = api.get_aim_situation()
     queue.push_g2m(list)
     # print(list)
-    time.sleep(1/64)
+    time.sleep(1/10)
