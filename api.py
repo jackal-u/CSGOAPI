@@ -3,10 +3,10 @@ import win32gui
 import win32process
 import pymem
 import ctypes
-import time,json,math,random
+import time,json,math,random,numpy
 
 from message_queue import  *
-from tutorial.autoaim import normalizeAngles, checkangles, calc_distance, nanchecker
+from tutorial.autoaim import normalizeAngles
 
 """
 用于测试的csgo账号（不要登录公网VAC服务器）:
@@ -72,9 +72,15 @@ class CSAPI:
             exit()
         # todo:已经得到了基地址，加上任意偏移就可读写表地址的数值
         list = self.get_current_xy()
-        self.aim_x = list[0]
-        self.aim_y = list[1]
+        self.aim_x = list[1]
+        self.aim_y = list[0]
         self.steps = 0
+        total_blood = 0
+        for h in self.get_enemy_health():
+            total_blood+=h
+        self.enemy_heath = total_blood
+
+
 
     def get_health(self):
             # 获取当前人物血量
@@ -378,15 +384,24 @@ class CSAPI:
         # self.aim_x = list[1]
         self.aim_y = pitch
         self.aim_x = yaw
+        # 下面是重置代码，用于reset极端情况，避免不必要的训练
+        if pitch >= +80.0:
+            print("protected!")
+            self.aim_y = 80.0
+        if pitch <= -80.0:
+            self.aim_y = -80.0
+
+        if yaw >= +180:
+            print("protected!")
+            self.aim_x = 180.0
+        if yaw <= -180:
+            print("protected!")
+            self.aim_x = -180.0
         print("俯仰角   ",self.aim_y ,'方位角：  ' , self.aim_x)
         enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
         self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
         self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
 
-        # 下面是重置代码，用于reset极端情况，避免不必要的训练
-        if pitch > +80.0 or pitch  < -80.0:
-            print("protected!")
-            self.aim_y = 0.0
         pos = self.get_current_position()
         posx = pos[0]
         posy = pos[1]
@@ -419,15 +434,15 @@ class CSAPI:
         cur = self.get_current_xy()
         cur_shang_xia = cur[0]
         cur_zuoyou = cur[1]
-        # 如果训练经过200步，角度差距还大于10，则进行重置；重置到敌人脑袋附近
-        if self.steps%200==0 and ( abs(cur_zuoyou - yaw) > 10  or abs(cur_shang_xia - pitch) > 20):
+        #如果训练经过200步，角度差距还大于10，则进行重置；重置到敌人脑袋附近
+        if self.steps%50==0 and ( abs(cur_zuoyou - yaw) > 10  or abs(cur_shang_xia - pitch) > 20) and random.random()<0.3:
             print("RESET!!!!")
             self.aim_x = yaw + random.random() * 5
             self.aim_y = pitch + random.random() * 3
             print("【重置！！】俯仰角   ", self.aim_y, '方位角：  ', self.aim_x)
             self.steps += 1
             return
-        if abs(cur_zuoyou - yaw) < 5 and abs(cur_shang_xia - pitch) < 10:
+        if abs(cur_zuoyou - yaw) < 5 and abs(cur_shang_xia - pitch) < 10 and random.random()<0.1:
             print("RESET!!!!")
             self.aim_x = yaw + random.random() * 5
             self.aim_y = pitch + random.random() * 3
@@ -442,11 +457,12 @@ class CSAPI:
 
     def set_reset_aim(self,is_reset,list):
         if is_reset:
-            self.aim_x = list [0]
-            self.aim_y = list [1]
-            enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
-            self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
-            self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
+            pass
+            # self.aim_x = list [0]
+            # self.aim_y = list [1]
+            # enginepointer = self.handle.read_int(self.off_enginedll + self.dwClientState)
+            # self.handle.write_float((enginepointer + self.dwClientState_ViewAngles), self.aim_y)
+            # self.handle.write_float((enginepointer + self.dwClientState_ViewAngles + 0x4), self.aim_x)
 
     def set_walk(self,list):
         # wasd jump attack
@@ -468,9 +484,10 @@ class CSAPI:
         total_blood = 0
         list = self.get_enemy_health()
         for i in list:
-            reward += i
-            total_blood += 100
-        reward = (total_blood-reward)*0.05
+            total_blood += i
+        # 这里计算血量减少的值作为奖赏
+        reward = abs(self.enemy_heath - total_blood)*80
+        self.enemy_heath = total_blood
 
         print('blood_reawrd: ',reward)
 
@@ -510,21 +527,30 @@ class CSAPI:
         # print("x_grad",pitch,"y_grad",yaw)
         print("当前俯仰角：",cur_shang_xia , "当前方位角",cur_zuoyou )
         print("正确俯仰角",pitch , "正确方位角", yaw)
-        # 如果 位置没有达到期望值 就基于惩罚
-        if abs(cur_zuoyou - yaw) > 30 :
-            reward -= (abs(cur_zuoyou - yaw)-30)*10
-        if abs(cur_shang_xia - pitch) > 15 :
-            reward -= (abs(cur_shang_xia - pitch)-15)*10
-        reward += 100/(abs(cur_zuoyou - yaw)  + abs(cur_shang_xia - pitch) )
 
-        if abs(cur_shang_xia) > 45:
-            reward -= abs(cur_shang_xia)
-        if self.steps % 200 == 0 and (abs(cur_zuoyou - yaw) > 10 or abs(cur_shang_xia - pitch) > 20):
-            print("RESET 惩罚 !!!!")
-            reward -= (abs(cur_zuoyou - yaw)+ abs(cur_shang_xia - pitch) )
+
+
+        # # 如果 位置没有达到期望值 就基于惩罚
+        # if abs(cur_zuoyou - yaw) > 30 :
+        #     reward -= (abs(cur_zuoyou - yaw)-30)*(abs(cur_zuoyou - yaw)-30)
+        # if abs(cur_shang_xia - pitch) > 80 :
+        #     # reward -= (abs(cur_shang_xia - pitch)-15)*(abs(cur_shang_xia - pitch)-15)*5
+        #     reward = 0
+
+        reward += 100/(abs(cur_zuoyou - yaw) + abs(cur_shang_xia - pitch)*1.5 ) # 这个可求导的奖励函数是一切的关键！
+        reward -= (abs(cur_shang_xia - pitch))*(abs(cur_shang_xia - pitch))*0.005
+        reward -= (abs(cur_zuoyou - yaw) ) * (abs(cur_zuoyou - yaw) )*0.005
+        # if abs(cur_shang_xia - pitch) > 20:
+        #     reward -= abs(cur_shang_xia)*2
+        #     print("p偏移惩罚！！", reward)
+
+        # if self.steps % 50 == 0 and (abs(cur_zuoyou - yaw) > 10 or abs(cur_shang_xia - pitch) > 20):
+        #     print("RESET 惩罚 !!!!")
+        #     reward -= (abs(cur_zuoyou - yaw)+ abs(cur_shang_xia - pitch) )
 
         print("STEPS:",self.steps)
         # print('aim_reward: ',reward)
+        print("FINAL REWARD",reward)
         self.steps += 1
         return reward
 
