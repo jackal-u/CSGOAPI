@@ -13,4 +13,5 @@ while True:
     list = api.get_aim_situation()
     queue.push_g2m(list)
     # print(list)
-    time.sleep(1/10)
+    time.sleep(1/15)
+

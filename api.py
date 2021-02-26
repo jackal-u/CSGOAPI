@@ -3,9 +3,9 @@ import win32gui
 import win32process
 import pymem
 import ctypes
-import time,json,math,random,numpy
+import time, json, math, random, numpy
 
-from message_queue import  *
+from message_queue import *
 from tutorial.autoaim import normalizeAngles
 
 """
@@ -45,6 +45,7 @@ class CSAPI:
         self.dwForceJump = int(off_set_dict["signatures"]["dwForceJump"])
         self.m_iItemDefinitionIndex=int(off_set_dict["netvars"]["m_iItemDefinitionIndex"])
 
+
         # todo:自动导入csgo.json为本类属性
 
         # Counter-Strike: Global Offensive 窗口标题 获得窗口句柄
@@ -79,6 +80,8 @@ class CSAPI:
         for h in self.get_enemy_health():
             total_blood+=h
         self.enemy_heath = total_blood
+        self.last_shangxia = 0
+        self.last_zuoyou   = 0
 
 
 
@@ -435,19 +438,19 @@ class CSAPI:
         cur_shang_xia = cur[0]
         cur_zuoyou = cur[1]
         #如果训练经过200步，角度差距还大于10，则进行重置；重置到敌人脑袋附近
-        if self.steps%50==0 and ( abs(cur_zuoyou - yaw) > 10  or abs(cur_shang_xia - pitch) > 20) and random.random()<0.3:
+        if self.steps%120==0 : # and ( abs(cur_zuoyou - yaw) > 10  or abs(cur_shang_xia - pitch) > 20) and random.random()<0.3
             print("RESET!!!!")
             self.aim_x = yaw + random.random() * 5
             self.aim_y = pitch + random.random() * 3
             print("【重置！！】俯仰角   ", self.aim_y, '方位角：  ', self.aim_x)
             self.steps += 1
             return
-        if abs(cur_zuoyou - yaw) < 5 and abs(cur_shang_xia - pitch) < 10 and random.random()<0.1:
-            print("RESET!!!!")
-            self.aim_x = yaw + random.random() * 5
-            self.aim_y = pitch + random.random() * 3
-            self.steps += 1
-            return
+        # if abs(cur_zuoyou - yaw) < 5 and abs(cur_shang_xia - pitch) < 10 and random.random()<0.1:
+        #     print("RESET!!!!")
+        #     self.aim_x = yaw + random.random() * 5
+        #     self.aim_y = pitch + random.random() * 3
+        #     self.steps += 1
+        #     return
 
         self.steps+=1
         print("steps: ",self.steps)
@@ -489,7 +492,7 @@ class CSAPI:
         reward = abs(self.enemy_heath - total_blood)*80
         self.enemy_heath = total_blood
 
-        print('blood_reawrd: ',reward)
+        print('blood_reawrd: ', reward)
 
         # todo:如果瞄准准星很靠近预期方向那就基于更多的reward，且reward最好取连续值
         pos = self.get_current_position()
@@ -536,10 +539,52 @@ class CSAPI:
         # if abs(cur_shang_xia - pitch) > 80 :
         #     # reward -= (abs(cur_shang_xia - pitch)-15)*(abs(cur_shang_xia - pitch)-15)*5
         #     reward = 0
-
-        reward += 100/(abs(cur_zuoyou - yaw) + abs(cur_shang_xia - pitch)*1.5 ) # 这个可求导的奖励函数是一切的关键！
+        #
+        reward += 100/(abs(   min( (cur_zuoyou - yaw), (360-(cur_zuoyou - yaw))))  + abs(cur_shang_xia - pitch)*1.5 ) # 这个可求导的奖励函数是一切的关键！  这个水平角的计算有问题，不应该是取顺时针角，而应该是取最小夹角。
         reward -= (abs(cur_shang_xia - pitch))*(abs(cur_shang_xia - pitch))*0.005
-        reward -= (abs(cur_zuoyou - yaw) ) * (abs(cur_zuoyou - yaw) )*0.005
+        reward -= abs(   min( (cur_zuoyou - yaw), (360-(cur_zuoyou - yaw))))*0.005
+
+        # # 下面添加 基于行为的奖励，而不是基于状态的奖励。
+        # if cur_shang_xia > pitch:
+        #     # 当前瞄准位置比较大，对减小的行为给予奖励，增大的行为给予惩罚
+        #     if cur_shang_xia > self.last_shangxia:
+        #         reward -= 20
+        #     elif cur_shang_xia < self.last_shangxia:
+        #         reward += 20
+        #     else:
+        #         reward -= 10
+        #
+        # else:
+        #     # 当前瞄准位置比较小，对加大的行为给予奖励，减小的行为给予惩罚
+        #     if cur_shang_xia > self.last_shangxia:
+        #         reward += 20
+        #     elif cur_shang_xia < self.last_shangxia:
+        #         reward -= 20
+        #     else:
+        #         reward -= 10
+        #
+        #
+        # if cur_zuoyou > yaw:
+        #     # 当前瞄准位置比较大，对减小的行为给予奖励，增大的行为给予惩罚
+        #     if cur_zuoyou > self.last_zuoyou:
+        #         reward -= 20
+        #     elif cur_zuoyou < self.last_zuoyou:
+        #         reward += 20
+        #     else:
+        #         reward -= 10
+        # else:
+        #     # 当前瞄准位置比较小，对加大的行为给予奖励，减小的行为给予惩罚
+        #     if cur_zuoyou > self.last_zuoyou:
+        #         reward += 20
+        #     elif cur_zuoyou < self.last_zuoyou:
+        #         reward -= 20
+        #     else:
+        #         reward -= 10
+
+        self.last_shangxia = cur_shang_xia
+        self.last_zuoyou = cur_zuoyou
+
+        #reward -=1
         # if abs(cur_shang_xia - pitch) > 20:
         #     reward -= abs(cur_shang_xia)*2
         #     print("p偏移惩罚！！", reward)
@@ -552,6 +597,7 @@ class CSAPI:
         # print('aim_reward: ',reward)
         print("FINAL REWARD",reward)
         self.steps += 1
+        reward -= 5
         return reward
 
 
@@ -582,7 +628,7 @@ if __name__ == '__main__':
 
 
     while True:
-        print(handle.get_reward())
+        print(handle.get_aim_situation())
         time.sleep(0.1)
 
 
